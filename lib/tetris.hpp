@@ -1,24 +1,30 @@
+#ifndef TETRIS
+#define TETRIS
+
+#include <algorithm>
 #include <expected>
+#include <functional>
 #include <iostream>
 #include <optional>
 #include <ranges>
+#include <sstream>
 #include <stdexcept>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "helper.hpp"
-
-#include "all_headers.h"
 
 enum class Key { HOLD, SPACE };
 enum class Rotation { CLOCKWISE, COUNTER_CLOCKWISE };
 enum class Direction { DOWN, LEFT, RIGHT };
 
+struct Coord;
+using Coords = std::vector<Coord>;
+
 struct Coord {
   int x;
   int y;
-
-  Coord() = default;
-  constexpr Coord(int _x, int _y) : x(_x), y(_y) {}
 
   bool inBounds(int width, int height) const {
     return x < width and x >= 0 and y < height and y >= 0;
@@ -37,16 +43,12 @@ struct Coord {
     }
   }
 
-  bool operator<(const Coord &other) {
-    // We sort by x, then y
-    return this->x == other.x ? this->y < other.y : this->x < other.x;
+  auto operator<=>(const Coord &other) const = default;
+  Coord operator+(const Coord &other) const {
+    return {x + other.x, y + other.y};
   }
-  Coord moveDirection(Direction direction) const {
+  Coord operator+(Direction direction) const {
     return *this + Coord::directionCoord(direction);
-  }
-
-  Coord operator+(const Coord other) const {
-    return Coord(x + other.x, y + other.y);
   }
   Coord operator*(int mul) const { return Coord(x * mul, y * mul); }
 };
@@ -54,7 +56,7 @@ struct Coord {
 class Shape {
   using KickData = std::array<std::array<Coord, 4>, 4>;
 
-  Shape(int _size, std::vector<Coord> _coords, int _rotationIndex = 0,
+  Shape(int _size, const Coords &_coords, int _rotationIndex = 0,
         std::optional<KickData> _kickData = std::nullopt)
       : size(_size), coords(_coords), rotationIndex(_rotationIndex),
         kickData(_kickData) {
@@ -62,7 +64,7 @@ class Shape {
       throw std::invalid_argument(
           "size cannot be non-positive (must be greater than or equal to 1)");
     }
-    if (std::any_of(_coords.cbegin(), _coords.cend(), [_size](auto &c) {
+    if (std::ranges::any_of(_coords, [_size](auto &c) {
           return not c.inBounds(_size, _size);
         })) {
       throw std::invalid_argument("coord arguments don't fit with size of "
@@ -79,7 +81,7 @@ public:
 
   std::string name;
   int size;
-  std::vector<Coord> coords;
+  Coords coords;
   int rotationIndex;
   std::optional<KickData> kickData;
 
@@ -94,34 +96,30 @@ public:
     }
   }
 
-  std::vector<Coord>
-  transformCoords(std::function<Coord(const Coord &)> f) const {
-    std::vector<Coord> newCoords;
-    newCoords.reserve(coords.size());
-
-    std::transform(coords.cbegin(), coords.cend(),
-                   std::back_inserter(newCoords), f);
-    return newCoords;
-    // return std::ranges::transform_view(coords, f) |
-    //        std::ranges::to<std::vector<Coord>>();
-    // ^ doesn't work because c++23 support lacking
+  Coords transformCoords(const std::function<Coord(const Coord &)> &f) const {
+    return std::ranges::transform_view(coords, f) | std::ranges::to<Coords>();
   }
   Shape rotateClockwise() const {
-    auto rotate = [this](const auto &coord) {
-      return Coord({coord.y, size - 1 - coord.x});
+    auto rotate = [this](const auto &coord) -> Coord {
+      return {coord.y, size - 1 - coord.x};
     };
-    return Shape(size, transformCoords(rotate), (rotationIndex + 1) % 4,
-                 kickData);
+    return {size, transformCoords(rotate), (rotationIndex + 1) % 4, kickData};
   }
 
   Shape rotateCounterClockwise() const {
-    auto rotate = [this](const auto &coord) {
-      return Coord({size - 1 - coord.y, coord.x});
+    auto rotate = [this](const auto &coord) -> Coord {
+      return {size - 1 - coord.y, coord.x};
     };
     // C++'s modulo operator can return <0 numbers, so we add 4
-    return Shape(size, transformCoords(rotate), (rotationIndex + 4 - 1) % 4,
-                 kickData);
+    return {size, transformCoords(rotate), (rotationIndex + 4 - 1) % 4,
+            kickData};
   }
+  Shape(Shape &) = default;
+  Shape(const Shape &) = default;
+  Shape(Shape &&) = default;
+  Shape &operator=(Shape const &) = default;
+  Shape &operator=(Shape &) = default;
+  Shape &operator=(Shape &&) = default;
 };
 
 class ShapeFactory {
@@ -156,7 +154,7 @@ public:
   const std::vector<Shape> defaultShapes{I_BLOCK, O_BLOCK, T_BLOCK, L_BLOCK,
                                          J_BLOCK, S_BLOCK, Z_BLOCK};
 
-  const std::vector<Shape> getShapes() const { return defaultShapes; }
+  const std::vector<Shape> &getShapes() const { return defaultShapes; }
 
   Shape getRandomShape() const {
     return defaultShapes[rand() % defaultShapes.size()];
@@ -188,11 +186,11 @@ private:
 
   void resetShapeLocation() {
     shapeLocation = {width / 2 - currentShape.size / 2,
-                     height - currentShape.size};
+                     height / 2 - currentShape.size};
   }
 
-  std::vector<Coord> absShapeCoords(const Coord &location,
-                                    const Shape &shape) const {
+  static std::vector<Coord> absShapeCoords(const Coord &location,
+                                           const Shape &shape) {
     auto addLocation = [&location](auto offset) { return location + offset; };
 
     return shape.transformCoords(addLocation);
@@ -222,22 +220,21 @@ private:
 
   int clear() {
     // Remove from the bottom row to the top
-    auto lastIter =
-        std::remove_if(cells.rbegin(), cells.rend(), [](auto const &c) {
-          return std::all_of(c.begin(), c.end(), std::identity());
-        });
-    int numCleared = 0;
-    while (lastIter != cells.rend()) {
-      *lastIter = std::vector<bool>(width, false);
-      numCleared++;
-      lastIter++;
+    auto removedRange = std::ranges::remove_if(
+        std::ranges::reverse_view(cells),
+        [](auto const &c) { return std::ranges::all_of(c, std::identity()); });
+
+    int numCleared = (int)removedRange.size();
+    for (auto &iter : removedRange) {
+      iter = std::vector<bool>(width, false);
     }
 
     return numCleared;
   }
 
+  // Returns whether the move leads to a crystallisation of the shape
   bool move(Direction direction) {
-    auto movedLocation = shapeLocation.moveDirection(direction);
+    auto movedLocation = shapeLocation + direction;
 
     if (not shapeBlocked(movedLocation,
                          currentShape)) { // flowing through air -- let it flow
@@ -253,15 +250,18 @@ private:
     for (auto c : absShapeCoords(shapeLocation, currentShape)) {
       setCellAt(c, true);
     }
-    resetShapeLocation();
+
     currentShape = factory.getRandomShape();
+
+    resetShapeLocation();
     heldInTurn = false;
+
     clear();
     return true;
   }
 
   void rotate(Rotation rotation) {
-    auto rotatedShape = [rotation, this]() {
+    auto rotatedShape = std::invoke([rotation, this] {
       switch (rotation) {
       case Rotation::CLOCKWISE:
         return currentShape.rotateClockwise();
@@ -270,7 +270,7 @@ private:
       default:
         std::unreachable();
       }
-    }();
+    });
 
     if (not shapeBlocked(shapeLocation, rotatedShape)) {
       currentShape = rotatedShape;
@@ -279,6 +279,7 @@ private:
       return;
     }
 
+    // We have kickdata, so we have to visit all of our options there
     auto kickData = rotatedShape.kickData->data()[rotatedShape.rotationIndex];
     for (auto &kickOffset : kickData) {
       Coord newLocation =
@@ -321,18 +322,34 @@ private:
     }
   }
 
-public:
   explicit Tetris(int _width, int _height) : width(_width), height(_height) {
     resetShapeLocation();
-    cells = std::vector<std::vector<bool>>(height, std::vector<bool>(width));
+    cells = std::vector(height, std::vector<bool>(width));
   }
 
+public:
+  using Input = std::variant<Direction, Key, Rotation>;
+  enum class InputError { INVALID_HEIGHT, INVALID_WIDTH };
+
   static Tetris standardTetris() { return Tetris(10, 40); }
+
+  static std::expected<Tetris, InputError>
+  createTetris(int width, int height, ShapeFactory factory = ShapeFactory()) {
+    auto breachesLimit = [&](auto var) {
+      return std::ranges::any_of(factory.defaultShapes,
+                                 [var](auto x) { return x.size > var; });
+    };
+    if (breachesLimit(width)) {
+      return std::unexpected(InputError::INVALID_WIDTH);
+    } else if (breachesLimit(height)) {
+      return std::unexpected(InputError::INVALID_HEIGHT);
+    }
+    return Tetris(width, height);
+  }
 
   auto getLevel() const { return level; }
   auto getScore() const { return score; }
 
-  using Input = std::variant<Direction, Key, Rotation>;
   void handleInput(Input input) {
     std::visit(overloaded{[this](Direction direction) { move(direction); },
                           [this](Key key) { handleKey(key); },
@@ -340,17 +357,42 @@ public:
                input);
   }
 
-  void print() const {
-    auto copy = cells;
-    for (auto c : absShapeCoords(shapeLocation, currentShape)) {
-      copy[height - 1 - c.y][c.x] = true;
-    }
-    for (auto r : std::ranges::drop_view(copy, height - 20)) {
-      for (bool x : r) {
-        std::cout << x << " ";
-      }
-      std::cout << std::endl;
-    }
-    std::cout << "---------------" << std::endl;
-  }
+  friend std::ostream &operator<<(std::ostream &stream, Tetris &tetris);
+  friend std::vector<std::string> outputRows(Tetris &tetris);
 };
+
+std::vector<std::string> outputRows(Tetris &tetris) {
+  auto copy = tetris.cells;
+  for (auto c :
+       Tetris::absShapeCoords(tetris.shapeLocation, tetris.currentShape)) {
+    copy[tetris.height - 1 - c.y][c.x] = true;
+  }
+
+  std::vector<std::string> rows;
+
+  for (auto r : std::ranges::drop_view(copy, tetris.height - 20)) {
+    std::ostringstream out;
+    for (auto x : r) {
+      out << x << ' ';
+    }
+    rows.push_back(out.str());
+  }
+  return rows;
+}
+
+std::ostream &operator<<(std::ostream &stream, Tetris &tetris) {
+  auto copy = tetris.cells;
+  for (auto c :
+       Tetris::absShapeCoords(tetris.shapeLocation, tetris.currentShape)) {
+    copy[tetris.height - 1 - c.y][c.x] = true;
+  }
+  for (auto r : std::ranges::drop_view(copy, tetris.height - 20)) {
+    for (bool x : r) {
+      stream << x << " ";
+    }
+    stream << std::endl;
+  }
+  return stream;
+}
+
+#endif

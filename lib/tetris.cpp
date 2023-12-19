@@ -22,8 +22,8 @@ int main() {
     if (mapping.contains(c)) {
       auto value = mapping[c];
       a.handleInput(value);
-      a.print();
     }
+
     a.handleInput(Direction::LEFT);
     std::cout.flush();
   }

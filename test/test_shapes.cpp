@@ -7,7 +7,7 @@
 
 std::ostream &operator<<(std::ostream &stream, Shape &shape) {
   std::vector<Coord> coordsCopy{shape.coords};
-  std::sort(coordsCopy.begin(), coordsCopy.end());
+  std::ranges::sort(coordsCopy);
 
   auto cIter = coordsCopy.begin();
   for (int i = 0; i < shape.size; i++) {
@@ -19,14 +19,14 @@ std::ostream &operator<<(std::ostream &stream, Shape &shape) {
         out = 'o';
         cIter++;
       }
-      stream << out;
+      stream << out << ' ';
     }
     stream << '\n';
   }
   return stream;
 }
 
-TEST_CASE("Shapes Test") {
+TEST_CASE("ShapesSanityCheck") {
   auto factory = ShapeFactory{};
   auto printShape = [](auto xd, std::ostream &os) { os << xd; };
 

@@ -51,7 +51,6 @@
 #include <utility>
 #include <valarray>
 #include <vector>
-#include <ranges>
 
 #if __cplusplus >= 201103L
 #include <array>
