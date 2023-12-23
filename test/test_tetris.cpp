@@ -1,11 +1,16 @@
 #include "ApprovalTests.hpp"
 #include "catch2/catch.hpp"
+#include <functional>
 #include <ranges>
 #include <sstream>
 #include <tuple>
-
-#include "../lib/tetris.hpp"
+#include <variant>
 #include <vector>
+
+#include "../lib/helper.hpp"
+#include "../lib/tetris.hpp"
+
+enum class AdditionalOps { LEFTMOST, RIGHTMOST, SNAP };
 
 std::ostringstream &operator<<(std::vector<std::string> &v,
                                std::ostringstream &stream) {
@@ -15,7 +20,9 @@ std::ostringstream &operator<<(std::vector<std::string> &v,
   return stream;
 }
 
-auto zip(auto sets) {
+// Zip 2D vectors of strings together
+// i.e. [[a, b, c], [d, e, f], [g, h, i]] -> [[a, d, g], [b, e, h], [c, f, i]]
+auto zip(std::vector<std::vector<std::string>> sets) {
   std::vector<std::vector<std::string>> ret;
 
   for (int i = 0; i < (int)sets[0].size(); i++) {
@@ -30,14 +37,13 @@ auto zip(auto sets) {
   return ret;
 }
 
+// Zips groups of three Tetris string representations together
 std::string interleaveRows(const std::string &delimiter,
                            std::vector<std::vector<std::string>> rs) {
   std::ostringstream out;
 
   int x = 0;
-  auto chunkFunc = [&x](auto, auto) {
-    return !(++x % 3 == 0);
-  };
+  auto chunkFunc = [&x](auto, auto) { return !(++x % 3 == 0); };
 
   for (auto group : rs | std::views::chunk_by(chunkFunc)) {
     for (auto y :
@@ -55,23 +61,57 @@ std::string interleaveRows(const std::string &delimiter,
   return out.str();
 }
 
+// Handle basic inputs as handled by Tetris
+auto doInputs = [](auto &&...ts) {
+  auto tetris = TetrisFactory::standardTetris();
+
+  std::vector<std::vector<std::string>> res;
+  res.push_back(tetris.outputRows());
+  for (auto x : {ts...}) {
+    tetris.handleInput(x);
+    res.push_back(tetris.outputRows());
+  }
+
+  std::stringstream os;
+  os << interleaveRows("| ", res);
+  return std::move(os);
+};
+auto passStream = [](auto &x, std::ostream &os) { os << x.str(); };
+
+// Handle special shape factory and basic inputs as handled by Tetris, and
+// additional ones
+auto refinedInputs = [](auto factory, auto &&...ts) {
+  auto tetris = TetrisFactory::defaultTetris(factory);
+
+  std::vector<std::vector<std::string>> res;
+  for (auto op : {variant_union<Input, AdditionalOps>::type(ts)...}) {
+    std::visit(overloaded{[&](AdditionalOps stuff) {
+                            switch (stuff) {
+                            case AdditionalOps::SNAP:
+                              res.push_back(tetris.outputRows());
+                              break;
+                            case AdditionalOps::LEFTMOST:
+                            case AdditionalOps::RIGHTMOST:
+                              auto operation =
+                                  (stuff == AdditionalOps::LEFTMOST)
+                                      ? Direction::LEFT
+                                      : Direction::RIGHT;
+                              for (int i = 0; i < tetris.width; i++) {
+                                tetris.handleInput(operation);
+                              }
+                              break;
+                            }
+                          },
+                          [&](auto xd) { tetris.handleInput(xd); }},
+               op);
+  }
+
+  std::stringstream os;
+  os << interleaveRows("| ", res);
+  return std::move(os);
+};
+
 TEST_CASE("TetrisBasic") {
-  auto doInputs = [](auto &&...ts) {
-    auto tetris = Tetris::standardTetris();
-
-    std::vector<std::vector<std::string>> res;
-    res.push_back(outputRows(tetris));
-    for (auto x : {ts...}) {
-      tetris.handleInput(x);
-      res.push_back(outputRows(tetris));
-    }
-
-    std::stringstream os;
-    os << interleaveRows("| ", res);
-    return std::move(os);
-  };
-  auto passStream = [](auto &x, std::ostream &os) { os << x.str(); };
-
   SECTION("TwoDowns") {
     ApprovalTests::Approvals::verify(doInputs(Direction::DOWN, Direction::DOWN),
                                      passStream);
@@ -80,6 +120,65 @@ TEST_CASE("TetrisBasic") {
     ApprovalTests::Approvals::verify(
         doInputs(Rotation::CLOCKWISE, Rotation::CLOCKWISE, Rotation::CLOCKWISE,
                  Rotation::CLOCKWISE),
+        passStream);
+  }
+}
+
+TEST_CASE("TetrisClear") {
+  SECTION("CanClear1") {
+    // Use I blocks since they're the easiest to get a clear with
+    struct IBlockFactory {
+      const Shape getShape() const { return StandardShapeFactory::I_BLOCK; }
+
+      const std::vector<const Shape> getShapes() const {
+        return {StandardShapeFactory::I_BLOCK};
+      }
+    };
+
+    ApprovalTests::Approvals::verify(
+        refinedInputs(IBlockFactory(), // factory
+                      AdditionalOps::LEFTMOST, Key::SPACE,
+                      AdditionalOps::SNAP, // Go leftmost
+                      AdditionalOps::RIGHTMOST, Direction::LEFT,
+                      Direction::LEFT, Key::SPACE,
+                      AdditionalOps::SNAP, // Go two left of rightmost
+                      Rotation::CLOCKWISE, AdditionalOps::RIGHTMOST,
+                      Direction::LEFT, Key::SPACE, AdditionalOps::SNAP,
+                      Rotation::CLOCKWISE, AdditionalOps::RIGHTMOST, Key::SPACE,
+                      AdditionalOps::SNAP // Put down two vertical bricks
+                      ),
+        // Should clear bottom-most level
+        passStream);
+  }
+}
+
+TEST_CASE("TetrisHold") {
+  SECTION("CanHold") {
+    // Get a block factory that simply iterates through the standard one, so we
+    // can test holding with unique shapes each time
+    struct IterateBlockFactory {
+      mutable int i = 0;
+      const Shape getShape() const {
+        return StandardShapeFactory::defaultShapes[i++];
+      }
+
+      const std::vector<const Shape> getShapes() const {
+        return StandardShapeFactory::defaultShapes;
+      }
+    };
+
+    ApprovalTests::Approvals::verify(
+        refinedInputs(
+            IterateBlockFactory(),
+            AdditionalOps::SNAP,            // Initial
+            Key::HOLD, AdditionalOps::SNAP, // New state
+            Key::HOLD,
+            AdditionalOps::SNAP, // Stay the same, can't hold multiple times
+            Key::SPACE, AdditionalOps::SNAP, // New shape
+            Key::HOLD,
+            AdditionalOps::SNAP // New shape, should be the same as the first
+                                // shape
+            ),
         passStream);
   }
 }

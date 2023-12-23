@@ -27,7 +27,7 @@ std::ostream &operator<<(std::ostream &stream, Shape &shape) {
 }
 
 TEST_CASE("ShapesSanityCheck") {
-  auto factory = ShapeFactory{};
+  auto factory = StandardShapeFactory{};
   auto printShape = [](auto xd, std::ostream &os) { os << xd; };
 
   ApprovalTests::Approvals::verifyAll("SHAPES", factory.defaultShapes,

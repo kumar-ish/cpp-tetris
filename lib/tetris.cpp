@@ -5,17 +5,16 @@
 #define KEY_LEFT 75
 #define KEY_RIGHT 77
 
-std::unordered_map<char, Tetris::Input> mapping{
-    {' ', Key::SPACE},
-    {'c', Key::HOLD},
-    {'q', Rotation::COUNTER_CLOCKWISE},
-    {'e', Rotation::CLOCKWISE},
-    {KEY_DOWN, Direction::DOWN},
-    {KEY_RIGHT, Direction::RIGHT},
-    {KEY_LEFT, Direction::LEFT}};
+std::unordered_map<char, Input> mapping{{' ', Key::SPACE},
+                                        {'c', Key::HOLD},
+                                        {'q', Rotation::COUNTER_CLOCKWISE},
+                                        {'e', Rotation::CLOCKWISE},
+                                        {KEY_DOWN, Direction::DOWN},
+                                        {KEY_RIGHT, Direction::RIGHT},
+                                        {KEY_LEFT, Direction::LEFT}};
 
 int main() {
-  Tetris a = Tetris::standardTetris();
+  auto a = TetrisFactory::standardTetris();
 
   char c;
   while (std::cin.get(c)) {
