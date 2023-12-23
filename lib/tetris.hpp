@@ -1,5 +1,4 @@
-#ifndef TETRIS
-#define TETRIS
+#pragma once
 
 #include <algorithm>
 #include <expected>
@@ -442,5 +441,3 @@ struct TetrisFactory {
     return Tetris<decltype(t)>::createTetris(10, 40, t).value();
   }
 };
-
-#endif

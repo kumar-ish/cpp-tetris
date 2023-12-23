@@ -38,12 +38,13 @@ auto zip(std::vector<std::vector<std::string>> sets) {
 }
 
 // Zips groups of three Tetris string representations together
+template <int groupSize>
 std::string interleaveRows(const std::string &delimiter,
                            std::vector<std::vector<std::string>> rs) {
   std::ostringstream out;
 
   int x = 0;
-  auto chunkFunc = [&x](auto, auto) { return !(++x % 3 == 0); };
+  auto chunkFunc = [&x](auto, auto) { return !(++x % groupSize == 0); };
 
   for (auto group : rs | std::views::chunk_by(chunkFunc)) {
     for (auto y :
@@ -62,7 +63,7 @@ std::string interleaveRows(const std::string &delimiter,
 }
 
 // Handle basic inputs as handled by Tetris
-auto doInputs = [](auto &&...ts) {
+auto doInputs = []<int groupSize = 3>(auto &&...ts) {
   auto tetris = TetrisFactory::standardTetris();
 
   std::vector<std::vector<std::string>> res;
@@ -73,14 +74,14 @@ auto doInputs = [](auto &&...ts) {
   }
 
   std::stringstream os;
-  os << interleaveRows("| ", res);
+  os << interleaveRows<groupSize>("| ", res);
   return std::move(os);
 };
 auto passStream = [](auto &x, std::ostream &os) { os << x.str(); };
 
 // Handle special shape factory and basic inputs as handled by Tetris, and
 // additional ones
-auto refinedInputs = [](auto factory, auto &&...ts) {
+auto refinedInputs = []<int groupSize = 3>(auto factory, auto &&...ts) {
   auto tetris = TetrisFactory::defaultTetris(factory);
 
   std::vector<std::vector<std::string>> res;
@@ -107,7 +108,7 @@ auto refinedInputs = [](auto factory, auto &&...ts) {
   }
 
   std::stringstream os;
-  os << interleaveRows("| ", res);
+  os << interleaveRows<groupSize>("| ", res);
   return std::move(os);
 };
 
@@ -118,8 +119,9 @@ TEST_CASE("TetrisBasic") {
   }
   SECTION("FourCWRotates") {
     ApprovalTests::Approvals::verify(
-        doInputs(Rotation::CLOCKWISE, Rotation::CLOCKWISE, Rotation::CLOCKWISE,
-                 Rotation::CLOCKWISE),
+        doInputs.template operator()<4>(
+            Rotation::CLOCKWISE, Rotation::CLOCKWISE, Rotation::CLOCKWISE,
+            Rotation::CLOCKWISE),
         passStream);
   }
 }
@@ -136,17 +138,18 @@ TEST_CASE("TetrisClear") {
     };
 
     ApprovalTests::Approvals::verify(
-        refinedInputs(IBlockFactory(), // factory
-                      AdditionalOps::LEFTMOST, Key::SPACE,
-                      AdditionalOps::SNAP, // Go leftmost
-                      AdditionalOps::RIGHTMOST, Direction::LEFT,
-                      Direction::LEFT, Key::SPACE,
-                      AdditionalOps::SNAP, // Go two left of rightmost
-                      Rotation::CLOCKWISE, AdditionalOps::RIGHTMOST,
-                      Direction::LEFT, Key::SPACE, AdditionalOps::SNAP,
-                      Rotation::CLOCKWISE, AdditionalOps::RIGHTMOST, Key::SPACE,
-                      AdditionalOps::SNAP // Put down two vertical bricks
-                      ),
+        refinedInputs.template operator()<4>(
+            IBlockFactory(), // factory
+            AdditionalOps::LEFTMOST, Key::SPACE,
+            AdditionalOps::SNAP, // Go leftmost
+            AdditionalOps::RIGHTMOST, Direction::LEFT, Direction::LEFT,
+            Key::SPACE,
+            AdditionalOps::SNAP, // Go two left of rightmost
+            Rotation::CLOCKWISE, AdditionalOps::RIGHTMOST, Direction::LEFT,
+            Key::SPACE, AdditionalOps::SNAP, Rotation::CLOCKWISE,
+            AdditionalOps::RIGHTMOST, Key::SPACE,
+            AdditionalOps::SNAP // Put down two vertical bricks
+            ),
         // Should clear bottom-most level
         passStream);
   }
@@ -168,7 +171,7 @@ TEST_CASE("TetrisHold") {
     };
 
     ApprovalTests::Approvals::verify(
-        refinedInputs(
+        refinedInputs.template operator()<5>(
             IterateBlockFactory(),
             AdditionalOps::SNAP,            // Initial
             Key::HOLD, AdditionalOps::SNAP, // New state
